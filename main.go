@@ -277,12 +277,14 @@ func (lp *LambdaParser) PParse(s string) error {
 			// TODO: Wrap nest_err in more information
 			return nest_err
 		}
-		var new_lexpr LExpr
-		new_lexpr = ConcatenateLExprs(parsed_contents)
-		if len(lp.LambdaBinding) != 0 {
-			new_lexpr = new_lexpr.LAbstract(LVar{lp.LambdaBinding})
+		lexpression := ConcatenateLExprs(parsed_contents)
+		if len(lp.LambdaBinding) == 0 {
+			lp.LExprArr = append(lp.LExprArr, &lexpression)
 		}
-		lp.LExprArr = append(lp.LExprArr, new_lexpr)
+		if len(lp.LambdaBinding) != 0 {
+			new_lexpr := (&lexpression).LAbstract(LVar{lp.LambdaBinding})
+			lp.LExprArr = append(lp.LExprArr, new_lexpr)
+		}
 	} else {
 		state := lp.PState + " Parentheses-Enclosed Expr"
 		p_err = StateCharError(state, s)
@@ -324,18 +326,18 @@ func (lp *LambdaParser) VParse(s string) error {
 		lp.PState = "V2"
 	} else if (lp.PState == "V2") && IsCapLetter(s) {
 		lvar := LVar{lp.CollectionStr}
-		lp.LExprArr = append(lp.LExprArr, lvar)
+		lp.LExprArr = append(lp.LExprArr, &lvar)
 		lp.CollectionStr = ""
 		lp.CollectionStr += s
 		lp.PState = "V1"
 	} else if (lp.PState == "V2") && (s == "L") {
 		lvar := LVar{lp.CollectionStr}
-		lp.LExprArr = append(lp.LExprArr, lvar)
+		lp.LExprArr = append(lp.LExprArr, &lvar)
 		lp.CollectionStr = ""
 		lp.PState = "L1"
 	} else if (lp.PState == "V2") && (s == "(") {
 		lvar := LVar{lp.CollectionStr}
-		lp.LExprArr = append(lp.LExprArr, lvar)
+		lp.LExprArr = append(lp.LExprArr, &lvar)
 		lp.CollectionStr = ""
 		lp.PState = "P"
 	} else {
