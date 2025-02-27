@@ -214,7 +214,9 @@ func (p *ParenTracker) Update(s string) {
 
 func IsCapLetter(s string) bool {
 	for _, r := range s {
-		if (r < 'A') || (r > 'Z') {
+		if r == 'L' {
+			return false
+		} else if (r < 'A') || (r > 'Z') {
 			return false
 		}
 	}
@@ -266,11 +268,11 @@ func (lp *LambdaParser) PParse(s string) error {
 	var p_err error
 	p_err = nil
 
-	if (lp.PState == "N") && (s == "(") {
+	if (lp.PState == "N") && (s == "(") && (lp.ParenthesesTracker.Counter == 0) {
 		lp.PState = "P"
 	} else if (lp.PState == "P") && (s != ")") {
 		lp.CollectionStr += s
-	} else if (lp.PState == "P") && (s == ")") {
+	} else if (lp.PState == "P") && (s == ")") && (lp.ParenthesesTracker.Counter == 0) {
 		nested_parser := CreateParser(lp.CollectionStr)
 		parsed_contents, nest_err := nested_parser.DriveParse()
 		if nest_err != nil {
@@ -284,7 +286,10 @@ func (lp *LambdaParser) PParse(s string) error {
 		if len(lp.LambdaBinding) != 0 {
 			new_lexpr := (&lexpression).LAbstract(LVar{lp.LambdaBinding})
 			lp.LExprArr = append(lp.LExprArr, new_lexpr)
+			lp.LambdaBinding = ""
 		}
+		lp.CollectionStr = ""
+		lp.PState = "N"
 	} else {
 		state := lp.PState + " Parentheses-Enclosed Expr"
 		p_err = StateCharError(state, s)
@@ -353,7 +358,8 @@ func StateCharError(state, next_str string) error {
 }
 
 func (lp *LambdaParser) DriveParse() ([]LExpr, error) {
-	for _, next_str_o := range lp.SrcStr {
+	for i, next_str_o := range lp.SrcStr {
+		fmt.Println("State", lp.PState, ": Parse covering ", lp.SrcStr[:i+1])
 		next_str := string(next_str_o)
 		major_state := string(lp.PState[0])
 		lp.ParenthesesTracker.Update(next_str)
@@ -388,56 +394,6 @@ func (lp *LambdaParser) DriveParse() ([]LExpr, error) {
 	return lp.LExprArr, nil
 }
 
-// Main function to convert a given input string into a lambda expression
-// Beforehand - uppercase everything, convert L to lambda
-//func ParseToLExpr(lstr string) []LExpr {
-//	var parser_state string
-//	parser_state = "N" // Neutral, L Lambda, V Variable, or P Parentheses
-//	track_nest := ParenTracker{Counter: 0}
-//	lambda_var := ""
-//	content_str := ""
-//	var expr_array []LExpr
-//	expr_array = nil
-//
-//	for len(lstr) > 0 {
-//		next_str := string(lstr[0])
-//		lstr = lstr[1:]
-//
-//		switch parser_state {
-//		default:
-//			panic("State not a valid N, P, L, or V state")
-//		case "N":
-//			if next_str == string('L') {
-//				parser_state = "L"
-//			} else if next_str == string('(') {
-//				track_nest.Update(next_str)
-//				parser_state = "P"
-//			} else if IsCapLetter(next_str) {
-//				content_str += next_str
-//				parser_state = "V1"
-//			} else {
-//				fmt.Println("Invalid character found in neutral parser state", next_str)
-//				panic("")
-//			}
-//		case "P":
-//			return expr_array
-//		case "V1":
-//			if IsCapLetter(next_str) {
-//				content_str += next_str
-//			} else if IsInteger(next_str) {
-//				content_str += next_str
-//				parser_state = "V2"
-//			} else {
-//				panic("All variables must be of the form a1, float72, a720, cat0, etc")
-//			}
-//		case "V2":
-//			if
-//		case "L":
-//			return expr_array
-//		}
-//	}
-//}
-
 func main() {
 	fmt.Println("yo")
 
@@ -463,4 +419,18 @@ func main() {
 	fmt.Println(nested_3.LPrint())
 
 	fmt.Println("Testing nested equality: ", nested_3.LEquals(&bzbyx))
+
+	// Test Parser
+	lr_diff := "LX1.(W1)LY1.(Y1Y1)LZ1.(Z1Z1)"
+	parser := CreateParser(lr_diff)
+	parse_out, parse_err := parser.DriveParse()
+	if parse_err != nil {
+		fmt.Println("Parse error: ", parse_err)
+	}
+	out_list := []string{}
+	for _, lexpr := range parse_out {
+		out_list = append(out_list, lexpr.LPrint())
+	}
+	fmt.Println(out_list)
+
 }
