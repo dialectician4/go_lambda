@@ -1,10 +1,13 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
-// import (
-// 	"fmt"
-// )
+type TransitionCallback func(p Parser, s string) (Parser, error)
+type ParserValidator func(p Parser)
+type TransitionMapper func(p Parser, s string) (Transition, error)
 
 type ParserState int
 
@@ -29,9 +32,41 @@ const (
 	P_f // Read corresponding closing ")" and process captured strings.
 	// TERMINAL for creating complete CONCAT expressions.
 
-	E0    // End State. Should always succeed some neutral/TERMINAL state.
+	E_0   // End State. Should always succeed some neutral/TERMINAL state.
 	DUMMY // Represents arbitrary state
 )
+
+func (s ParserState) ToString() string {
+	switch s {
+	case I_i:
+		return "I_i"
+	case L_i:
+		return "L_i"
+	case LV1:
+		return "LV1"
+	case LV2:
+		return "LV2"
+	case LV3:
+		return "LV3"
+	case LP1:
+		return "LP1"
+	case L_f:
+		return "L_f"
+	case V_i:
+		return "V_i"
+	case V_f:
+		return "V_f"
+	case P_i:
+		return "P_i"
+	case P_f:
+		return "P_f"
+	case E_0:
+		return "E_0"
+	case DUMMY:
+		return "DUMMY"
+	}
+	return "indeterminate state"
+}
 
 // Create 1 map per state to return subsequent state given a certain string
 
@@ -116,23 +151,75 @@ func P_i_Mapper(p Parser, s string) (Transition, error) {
 
 // Mappers for L states (mapping lambda-bound expression)
 func L_i_Mapper(p Parser, s string) (Transition, error) {
-	return Transition{}, nil
+	var next_state ParserState
+	if IsCapLetter(s) {
+		next_state = LV1
+		return Transition{S_f: next_state, S_i: p.TState.S_f}, nil
+	}
+	L_i_err := fmt.Errorf(
+		"Currently processing lambda-function, expecting first alphabetical char in"+
+			" binding variable but found char %v",
+		s,
+	)
+	return p.TState, L_i_err
 }
 
 func LV1_Mapper(p Parser, s string) (Transition, error) {
-	return Transition{}, nil
+	var next_state ParserState
+	if IsCapLetter(s) {
+		next_state = LV1
+		return Transition{S_f: next_state, S_i: p.TState.S_f}, nil
+	} else if IsInteger(s) {
+		next_state = LV2
+		return Transition{S_f: next_state, S_i: p.TState.S_f}, nil
+	}
+	L_i_err := fmt.Errorf(
+		"Currently processing lambda-function, expecting alphanumeric character for"+
+			" binding variable but found char %v",
+		s,
+	)
+	return p.TState, L_i_err
 }
 
 func LV2_Mapper(p Parser, s string) (Transition, error) {
-	return Transition{}, nil
+	var next_state ParserState
+	if IsInteger(s) {
+		next_state = LV2
+		return Transition{S_f: next_state, S_i: p.TState.S_f}, nil
+	} else if s == "." {
+		next_state = LV3
+		return Transition{S_f: next_state, S_i: p.TState.S_f}, nil
+	}
+	L_i_err := fmt.Errorf(
+		"Currently processing lambda-function, expecting numeric suffix for"+
+			" binding variable but found char %v",
+		s,
+	)
+	return p.TState, L_i_err
 }
 
 func LV3_Mapper(p Parser, s string) (Transition, error) {
-	return Transition{}, nil
+	var next_state ParserState
+	if s == "(" {
+		next_state = LP1
+		return Transition{S_f: next_state, S_i: p.TState.S_f}, nil
+	}
+	L_i_err := fmt.Errorf(
+		"Currently processing lambda-function, expecting function body"+
+			" bound by (). Looking for start ( but found char %v",
+		s,
+	)
+	return p.TState, L_i_err
 }
 
 func LP1_Mapper(p Parser, s string) (Transition, error) {
-	return Transition{}, nil
+	var next_state ParserState
+	if (s == ")") && (p.NestTracker.Counter == 0) {
+		next_state = L_f
+		return Transition{S_f: next_state, S_i: p.TState.S_f}, nil
+	}
+	next_state = LP1
+	return Transition{S_f: next_state, S_i: p.TState.S_f}, nil
 }
 
 type Transition struct {
@@ -158,23 +245,73 @@ func Parser_Init() Parser {
 	}
 }
 
-type TransitionCallback func(p Parser, s string) (Parser, error)
-type ParserValidator func(p Parser)
-type TransitionMapper func(p Parser, s string) (Transition, error)
-
 type TransitionExecutor struct {
+	// Map containing all callbacks to be executed based off entering/exiting a given ParserState
 	TransitionCallbackMap map[Transition][]TransitionCallback
-	TransitionMap         map[ParserState]TransitionMapper
+	// Map containing a map to new state from current state (current state is map key)
+	TransitionMap map[ParserState]TransitionMapper
+}
+
+func (t *TransitionExecutor) LoadCallback(ts Transition, cb []TransitionCallback) {
+	t.TransitionCallbackMap[ts] = append(t.TransitionCallbackMap[ts], cb...)
+}
+
+func TransitionExecutor_Init() TransitionExecutor {
+	executor := TransitionExecutor{}
+	// I_i setup
+	executor.TransitionMap[I_i] = I_i_Mapper
+	// V Variable state maps
+	// V_i setup
+	executor.TransitionMap[V_i] = V_i_Mapper
+	transition_to_V_i := Transition{S_f: V_i, S_i: DUMMY}
+	build_lvar := []TransitionCallback{executor.BuildLVar}
+	executor.LoadCallback(transition_to_V_i, build_lvar)
+	// V_f setup
+	executor.TransitionMap[V_f] = V_f_Mapper
+	transition_to_V_f := Transition{S_f: V_f, S_i: DUMMY}
+	executor.LoadCallback(transition_to_V_f, build_lvar)
+	capture_lvar := []TransitionCallback{executor.CaptureLVar}
+	// From V_f to the start of a new LExpr or end of strings
+	executor.LoadCallback(Transition{S_f: V_i, S_i: V_f}, capture_lvar)
+	executor.LoadCallback(Transition{S_f: L_i, S_i: V_f}, capture_lvar)
+	executor.LoadCallback(Transition{S_f: P_i, S_i: V_f}, capture_lvar)
+	executor.LoadCallback(Transition{S_f: E_0, S_i: V_f}, capture_lvar)
+	// P Parenthetical state maps
+	// P_i setup
+	// Non-P state into P state triggers no effective callbacks
+	// Only P_i to P_i captures
+	P_i_to_P_i := Transition{S_f: P_i, S_i: P_i}
+	build_parenthetical := []TransitionCallback{executor.BuildParenthetical}
+	executor.LoadCallback(P_i_to_P_i, build_parenthetical)
+	// P_f setup
+	P_i_to_P_f := Transition{S_i: P_i, S_f: P_f}
+	capture_parenthetical := []TransitionCallback{executor.CaptureParenthetical}
+	executor.LoadCallback(P_i_to_P_f, capture_parenthetical)
+	// L Lambda state maps
+	transition_to_LV1 := Transition{S_f: LV1, S_i: DUMMY}
+	executor.LoadCallback(transition_to_LV1, build_lvar)
+	transition_to_LV2 := Transition{S_f: LV2, S_i: DUMMY}
+	executor.LoadCallback(transition_to_LV2, build_lvar)
+	LP1_to_LP1 := Transition{S_f: LP1, S_i: LP1}
+	executor.LoadCallback(LP1_to_LP1, build_parenthetical)
+	LP1_to_L_f := Transition{S_f: L_f, S_i: LP1}
+	capture_lambda := []TransitionCallback{executor.CaptureLambda}
+	executor.LoadCallback(LP1_to_L_f, capture_lambda)
+	return executor
 }
 
 func (t *TransitionExecutor) Parse(target_str string) (Parser, error) {
+	target_str = strings.ToUpper(target_str)
 	p := Parser_Init()
-
 	for _, char := range target_str {
 		// Keep track of current parentheses nesting level (specifically for LP1, P_i, and P_f states)
 		// NOTE: TransitionMapper has parser and next char as input. p.NestTracker has nesting level
 		// INCLUDING NEXT CHAR. So if next char is ) and parse level is 0, then closing ) has been found
 		// for a previous opening ( at the same depth. Important for designing P_i and LP1 mappers.
+		fmt.Printf("Current state (HEAD %v, TAIL %v) reading char %v",
+			p.TState.S_f.ToString(),
+			p.TState.S_i.ToString(),
+			char)
 		p.NestTracker.Update(string(char))
 		// For current state, find and apply callback to determine next state using next char
 		current_transition, transition_err := t.TransitionMap[p.TState.S_f](p, string(char))
@@ -191,8 +328,8 @@ func (t *TransitionExecutor) Parse(target_str string) (Parser, error) {
 			return p, callback_err
 		}
 	}
-	// Transition into terminal state E0 and run final callbacks in response
-	final_transition := Transition{S_i: p.TState.S_f, S_f: E0}
+	// Transition into terminal state E_0 and run final callbacks in response
+	final_transition := Transition{S_i: p.TState.S_f, S_f: E_0}
 	p.TState = final_transition
 	var callback_err error = nil
 	p, callback_err = t.Apply(p, "")
